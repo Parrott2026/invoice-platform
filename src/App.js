@@ -380,21 +380,19 @@ function BulkUpload(props) {
     var items=arr.map(function(f){return {id:idRef.current++,file:f,fileName:f.name,status:"pending",data:Object.assign({},emptyForm,{fileName:f.name})};});
     setQueue(items);
     for(var i=0;i<items.length;i++){
-      (function(item){
-        var iid=item.id;
-        setQueue(function(q){return q.map(function(x){return x.id===iid?Object.assign({},x,{status:"extracting"}):x;});});
-        extractInvoiceData(item.file).then(function(d){
-          var autoDue="";
-          if(d.invoiceDate){var dt=new Date(d.invoiceDate);dt.setDate(dt.getDate()+30);autoDue=d.dueDate||dt.toISOString().split("T")[0];}
-          var nd={supplier:d.supplier||"",invoiceNo:d.invoiceNo||"",invoiceDate:d.invoiceDate||"",dueDate:autoDue,amount:d.amount||"",currency:d.currency&&CURRENCIES.includes(d.currency)?d.currency:"EUR",notes:d.notes||"",department:"Engineering",equipment:"",jobRef:"",budgetId:"",fileName:item.file.name};
-          var did=item.id;
-          setQueue(function(q){return q.map(function(x){return x.id===did?Object.assign({},x,{status:"done",data:nd}):x;});});
-        }).catch(function(){
-          var eid=item.id;
-          setQueue(function(q){return q.map(function(x){return x.id===eid?Object.assign({},x,{status:"error"}):x;});});
-        });
-      })(items[i]);
+      var item=items[i];
+      setQueue(function(q){var id=item.id;return q.map(function(x){return x.id===id?Object.assign({},x,{status:"extracting"}):x;});});
+      try{
+        var d=await extractInvoiceData(item.file);
+        var autoDue="";
+        if(d.invoiceDate){var dt=new Date(d.invoiceDate);dt.setDate(dt.getDate()+30);autoDue=d.dueDate||dt.toISOString().split("T")[0];}
+        var nd={supplier:d.supplier||"",invoiceNo:d.invoiceNo||"",invoiceDate:d.invoiceDate||"",dueDate:autoDue,amount:d.amount||"",currency:d.currency&&CURRENCIES.includes(d.currency)?d.currency:"EUR",notes:d.notes||"",department:"Engineering",equipment:"",jobRef:"",budgetId:"",fileName:item.file.name};
+        setQueue(function(q){var id=item.id;var data=nd;return q.map(function(x){return x.id===id?Object.assign({},x,{status:"done",data:data}):x;});});
+      }catch(e){
+        setQueue(function(q){var id=item.id;return q.map(function(x){return x.id===id?Object.assign({},x,{status:"error"}):x;});});
+      }
     }
+  }
     }
   }
   function updateField(id,field,value){setQueue(function(q){return q.map(function(x){return x.id===id?Object.assign({},x,{data:Object.assign({},x.data,{[field]:value})}):x;});});}
