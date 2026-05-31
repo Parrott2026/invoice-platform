@@ -344,7 +344,7 @@ export default function App() {
   useEffect(()=>{const h=e=>{if(nRef.current&&!nRef.current.contains(e.target))setShowN(false);};document.addEventListener("mousedown",h);return()=>document.removeEventListener("mousedown",h);},[]);
   useEffect(()=>{if(loggedIn)loadData();},[loggedIn]);
 
-  const loadData=async()=>{setLoading(true);const bRes=await supabase.from("budgets").select("*").order("created_at",{ascending:true});const iRes=await supabase.from("invoices").select("*").order("created_at",{ascending:false});if(bRes.data)setBudgets(bRes.data);if(iRes.data)setInv(iRes.data);setLoading(false);};
+  const loadData=async()=>{setLoading(true);const bRes=await supabase.from("budgets").select("*").order("created_at",{ascending:true});const iRes=await supabase.from("invoices").select("*").order("invoice_date",{ascending:true,nullsFirst:false});if(bRes.data)setBudgets(bRes.data);if(iRes.data)setInv(iRes.data);setLoading(false);};
   const handleLogin=(r,name)=>{setRole(r);setUserName(name);setLoggedIn(true);setView(r==="CE"?"tracker":"approvals");};
   const handleLogout=()=>{setLoggedIn(false);setRole(null);setUserName("");setPage("invoices");setView("tracker");setBulk(false);setSelB(null);};
   const myN=notifs.filter(n=>n.role===role);
@@ -364,7 +364,8 @@ export default function App() {
 
   const submitBulk=async(done)=>{const inserts=done.map(x=>({supplier:x.data.supplier,invoice_no:x.data.invoiceNo,invoice_date:x.data.invoiceDate||null,due_date:x.data.dueDate||null,amount:parseFloat(x.data.amount)||0,currency:x.data.currency,department:x.data.department,equipment:x.data.equipment||null,job_ref:x.data.jobRef||null,notes:x.data.notes||null,file_name:x.data.fileName||null,budget_id:x.data.budgetId||null,status:"Pending",created_by:userName}));const res=await supabase.from("invoices").insert(inserts).select();if(res.data)setInv(p=>[...res.data,...p]);push("Captain",done.length+" new invoice"+(done.length!==1?"s":"")+" awaiting approval");setBulk(false);setView("tracker");};
 
-  const filtered=invoices.filter(i=>{const ms=fStatus==="All"||i.status===fStatus;const q=search.toLowerCase();return ms&&(!q||i.supplier.toLowerCase().includes(q)||(i.invoice_no||"").toLowerCase().includes(q)||(i.job_ref||"").toLowerCase().includes(q));});
+  const [sortOrder,setSortOrder]=useState("desc");
+  const filtered=invoices.filter(i=>{const ms=fStatus==="All"||i.status===fStatus;const q=search.toLowerCase();return ms&&(!q||i.supplier.toLowerCase().includes(q)||(i.invoice_no||"").toLowerCase().includes(q)||(i.job_ref||"").toLowerCase().includes(q));}).sort((a,b)=>{const da=new Date(a.invoice_date||a.invoiceDate||0);const db=new Date(b.invoice_date||b.invoiceDate||0);return sortOrder==="desc"?db-da:da-db;});
   const pending=invoices.filter(i=>i.status==="Pending");
   const lF={English:"🇬🇧",Italian:"🇮🇹",French:"🇫🇷"};
   const F=(field,label,type="text",ph="",req=false)=>(<div><Lbl required={req}>{label}</Lbl><input type={type} value={form[field]} placeholder={ph} onChange={e=>{const v=e.target.value;setForm(p=>({...p,[field]:v}));}} style={{...SS.inp,borderColor:err[field]?"#C62828":"#ccc"}}/>{err[field]&&<p style={{fontSize:12,color:"#C62828",margin:"4px 0 0"}}>Required</p>}</div>);
@@ -402,7 +403,7 @@ export default function App() {
           <div style={SS.card}>
             <div style={{padding:"14px 16px",borderBottom:"1px solid #f0f0f0",display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
               <input placeholder="🔍 Search supplier, invoice no., job ref…" value={search} onChange={e=>setSearch(e.target.value)} style={{...SS.inp,flex:1,minWidth:180}}/>
-              <div style={{display:"flex",gap:6}}>{["All","Pending","Approved","Rejected"].map(s=><button key={s} onClick={()=>setFS(s)} style={fStatus===s?SS.btnTs:SS.btnGs}>{s}</button>)}</div>
+              <div style={{display:"flex",gap:6}}>{["All","Pending","Approved","Rejected"].map(s=><button key={s} onClick={()=>setFS(s)} style={fStatus===s?SS.btnTs:SS.btnGs}>{s}</button>)}<button onClick={()=>setSortOrder(o=>o==="desc"?"asc":"desc")} style={{...SS.btnGs,fontSize:12}}>{sortOrder==="desc"?"📅 Newest first":"📅 Oldest first"}</button></div>
             </div>
             <InvoiceTable invoices={filtered} budgets={budgets} onStatus={updateStatus} showActions={true}/>
             <div style={{padding:"10px 16px",borderTop:"1px solid #f0f0f0"}}><span style={{fontSize:13,color:"#888"}}>{filtered.length+" invoice"+(filtered.length!==1?"s":"")+" shown"}</span></div>
