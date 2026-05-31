@@ -1,4 +1,3 @@
-
 import { useState, useRef, useEffect } from "react";
 import { createClient } from "@supabase/supabase-js";
 
@@ -211,7 +210,6 @@ function InvoiceTable(props) {
       <tbody>
         {invoices.length===0&&<tr><td colSpan={6} style={{padding:"2.5rem",textAlign:"center",color:"#999"}}>No invoices found</td></tr>}
         {invoices.map(function(inv,i){
-          var budget=budgets.find(function(b){return b.id===(inv.budget_id||inv.budgetId);});
           return(
             <tr key={inv.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"#fff":"#fafbfc"}}>
               <td style={{padding:"13px 16px",fontWeight:600,color:"#222"}}>{inv.supplier}</td>
@@ -382,16 +380,21 @@ function BulkUpload(props) {
     var items=arr.map(function(f){return {id:idRef.current++,file:f,fileName:f.name,status:"pending",data:Object.assign({},emptyForm,{fileName:f.name})};});
     setQueue(items);
     for(var i=0;i<items.length;i++){
-      var item=items[i];var iid=item.id;
-      setQueue(function(q){return q.map(function(x){return x.id===iid?Object.assign({},x,{status:"extracting"}):x;});});
-      try{
-        var d=await extractInvoiceData(item.file);
-        var autoDue="";
-        if(d.invoiceDate){var dt=new Date(d.invoiceDate);dt.setDate(dt.getDate()+30);autoDue=d.dueDate||dt.toISOString().split("T")[0];}
-        var nd={supplier:d.supplier||"",invoiceNo:d.invoiceNo||"",invoiceDate:d.invoiceDate||"",dueDate:autoDue,amount:d.amount||"",currency:d.currency&&CURRENCIES.includes(d.currency)?d.currency:"EUR",notes:d.notes||"",department:"Engineering",equipment:"",jobRef:"",budgetId:"",fileName:item.file.name};
-        var did=item.id;
-        setQueue(function(q){return q.map(function(x){return x.id===did?Object.assign({},x,{status:"done",data:nd}):x;});});
-      }catch(e){var eid=item.id;setQueue(function(q){return q.map(function(x){return x.id===eid?Object.assign({},x,{status:"error"}):x;});});}
+      (function(item){
+        var iid=item.id;
+        setQueue(function(q){return q.map(function(x){return x.id===iid?Object.assign({},x,{status:"extracting"}):x;});});
+        extractInvoiceData(item.file).then(function(d){
+          var autoDue="";
+          if(d.invoiceDate){var dt=new Date(d.invoiceDate);dt.setDate(dt.getDate()+30);autoDue=d.dueDate||dt.toISOString().split("T")[0];}
+          var nd={supplier:d.supplier||"",invoiceNo:d.invoiceNo||"",invoiceDate:d.invoiceDate||"",dueDate:autoDue,amount:d.amount||"",currency:d.currency&&CURRENCIES.includes(d.currency)?d.currency:"EUR",notes:d.notes||"",department:"Engineering",equipment:"",jobRef:"",budgetId:"",fileName:item.file.name};
+          var did=item.id;
+          setQueue(function(q){return q.map(function(x){return x.id===did?Object.assign({},x,{status:"done",data:nd}):x;});});
+        }).catch(function(){
+          var eid=item.id;
+          setQueue(function(q){return q.map(function(x){return x.id===eid?Object.assign({},x,{status:"error"}):x;});});
+        });
+      })(items[i]);
+    }
     }
   }
   function updateField(id,field,value){setQueue(function(q){return q.map(function(x){return x.id===id?Object.assign({},x,{data:Object.assign({},x.data,{[field]:value})}):x;});});}
