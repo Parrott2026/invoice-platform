@@ -142,7 +142,7 @@ function InvoiceTable({ invoices, budgets, onStatus, showActions }) {
           <tr key={inv.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"#fff":"#fafbfc"}}>
             <td style={{padding:"13px 16px",fontWeight:600,color:"#222"}}>{inv.supplier}</td>
             <td style={{padding:"13px 16px",color:"#555"}}>{inv.invoice_no||inv.invoiceNo}</td>
-            <td style={{padding:"13px 16px",color:"#555"}}>{inv.invoice_date||inv.invoiceDate||"—"}</td>
+            <td style={{padding:"13px 16px",color:"#555"}}>{(function(d){if(!d)return "—";var p=String(d).split("-");return p.length===3?p[2]+"."+p[1]+"."+p[0]:d;})(inv.invoice_date||inv.invoiceDate)}</td>
             <td style={{padding:"13px 16px",fontWeight:600}}>{inv.currency} {fmt(inv.amount)}</td>
             <td style={{padding:"13px 16px"}}><Badge status={inv.status}/></td>
             <td style={{padding:"10px 16px"}}>
