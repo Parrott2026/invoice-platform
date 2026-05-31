@@ -44,7 +44,7 @@ function downloadInvoicePDF(inv, budgets) {
 async function extractInvoiceData(file) {
   const b64 = await new Promise((res,rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = rej; r.readAsDataURL(file); });
   try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {method:"POST",headers:{"Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-opus-4-5",max_tokens:1000,messages:[{role:"user",content:[{type:file.type.startsWith("image/")?"image":"document",source:{type:"base64",media_type:file.type,data:b64}},{type:"text",text:"Extract invoice data. Return ONLY JSON: supplier, invoiceNo, invoiceDate (YYYY-MM-DD), dueDate (YYYY-MM-DD or empty), amount (number string), currency (ISO 3-letter), notes (max 100 chars), language. No markdown."}]}]})});
+    const res = await fetch("https://api.anthropic.com/v1/messages", {method:"POST",headers:{"Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,messages:[{role:"user",content:[{type:file.type.startsWith("image/")?"image":"document",source:{type:"base64",media_type:file.type,data:b64}},{type:"text",text:"Extract invoice data. Return ONLY JSON: supplier, invoiceNo, invoiceDate (YYYY-MM-DD), dueDate (YYYY-MM-DD or empty), amount (number string), currency (ISO 3-letter), notes (max 100 chars), language. No markdown."}]}]})});
     const data = await res.json();
     const text = (data.content && data.content.find(b => b.type==="text") || {}).text || "{}";
     return JSON.parse(text.replace(/```json|```/g,"").trim());
@@ -135,14 +135,14 @@ function DropZone({ onFile, fileName, extracting }) {
 function InvoiceTable({ invoices, budgets, onStatus, showActions }) {
   return (
     <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
-      <thead><tr style={{background:"#f7f8fa"}}>{["Supplier","Invoice No.","Department","Amount","Status","Actions"].map(h => <th key={h} style={{padding:"11px 16px",textAlign:"left",fontWeight:600,color:"#555",fontSize:13,borderBottom:"2px solid #e0e0e0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+      <thead><tr style={{background:"#f7f8fa"}}>{["Supplier","Invoice No.","Invoice Date","Amount","Status","Actions"].map(h => <th key={h} style={{padding:"11px 16px",textAlign:"left",fontWeight:600,color:"#555",fontSize:13,borderBottom:"2px solid #e0e0e0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
       <tbody>
         {invoices.length===0 && <tr><td colSpan={6} style={{padding:"2.5rem",textAlign:"center",color:"#999"}}>No invoices found</td></tr>}
         {invoices.map((inv,i) => (
           <tr key={inv.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"#fff":"#fafbfc"}}>
             <td style={{padding:"13px 16px",fontWeight:600,color:"#222"}}>{inv.supplier}</td>
             <td style={{padding:"13px 16px",color:"#555"}}>{inv.invoice_no||inv.invoiceNo}</td>
-            <td style={{padding:"13px 16px",color:"#555"}}>{inv.department}</td>
+            <td style={{padding:"13px 16px",color:"#555"}}>{inv.invoice_date||inv.invoiceDate||"—"}</td>
             <td style={{padding:"13px 16px",fontWeight:600}}>{inv.currency} {fmt(inv.amount)}</td>
             <td style={{padding:"13px 16px"}}><Badge status={inv.status}/></td>
             <td style={{padding:"10px 16px"}}>
