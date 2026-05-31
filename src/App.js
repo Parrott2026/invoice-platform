@@ -43,12 +43,14 @@ function downloadInvoicePDF(inv, budgets) {
 
 async function extractInvoiceData(file) {
   const b64 = await new Promise((res,rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = rej; r.readAsDataURL(file); });
-  try {
-    const res = await fetch("https://api.anthropic.com/v1/messages", {method:"POST",headers:{"Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,messages:[{role:"user",content:[{type:file.type.startsWith("image/")?"image":"document",source:{type:"base64",media_type:file.type,data:b64}},{type:"text",text:"Extract invoice data. Return ONLY JSON: supplier, invoiceNo, invoiceDate (YYYY-MM-DD), dueDate (YYYY-MM-DD or empty), amount (number string), currency (ISO 3-letter), notes (max 100 chars), language. No markdown."}]}]})});
-    const data = await res.json();
-    const text = (data.content && data.content.find(b => b.type==="text") || {}).text || "{}";
-    return JSON.parse(text.replace(/```json|```/g,"").trim());
-  } catch(e) { return {}; }
+  const prompt = "Extract invoice data from this document. The SUPPLIER is the company that ISSUED the invoice (usually at the top, with the logo/letterhead) — NOT the bill-to / customer / shipping company. Read proforma invoices and reverse-charge (inversione contabile / non soggetto) documents too. For amount, use the final total payable (Total Due / Amount Due / Net Amount To Pay / Document Total). Detect currency from the symbol or code: GBP for \u00a3, EUR for \u20ac, USD for $. Return ONLY JSON, no markdown: {supplier, invoiceNo, invoiceDate (YYYY-MM-DD), dueDate (YYYY-MM-DD or empty), amount (number string, no thousands separators), currency (ISO 3-letter), notes (max 100 chars), language}. If you cannot read the document at all, return {\"error\":\"unreadable\"}.";
+  const res = await fetch("https://api.anthropic.com/v1/messages", {method:"POST",headers:{"Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,messages:[{role:"user",content:[{type:file.type.startsWith("image/")?"image":"document",source:{type:"base64",media_type:file.type,data:b64}},{type:"text",text:prompt}]}]})});
+  if (!res.ok) { const t = await res.text(); throw new Error("API "+res.status+": "+t.slice(0,200)); }
+  const data = await res.json();
+  const text = (data.content && data.content.find(b => b.type==="text") || {}).text || "{}";
+  const parsed = JSON.parse(text.replace(/```json|```/g,"").trim());
+  if (parsed.error) throw new Error("Could not read document");
+  return parsed;
 }
 
 function LoginScreen({ onLogin }) {
@@ -282,23 +284,39 @@ function BulkUpload({ onBack, onSubmit }) {
   const [drag, setDrag] = useState(false);
   const fileRef = useRef();
   const idRef = useRef(1000);
-  const handleFiles = async (files) => {
-    const arr = Array.from(files).filter(f => f.type==="application/pdf" || f.type.startsWith("image/"));
-    if (!arr.length) return;
-    const items = arr.map(f => ({id:idRef.current++,file:f,fileName:f.name,status:"pending",data:{...emptyForm,fileName:f.name}}));
-    setQueue(items);
-    for (let i=0; i<items.length; i++) {
-      const cur=items[i], curId=cur.id;
-      setQueue(q => q.map(x => x.id===curId?{...x,status:"extracting"}:x));
+  const processOne = async (cur) => {
+    const curId = cur.id;
+    setQueue(q => q.map(x => x.id===curId?{...x,status:"extracting",error:null}:x));
+    let lastErr = null;
+    for (let attempt=0; attempt<2; attempt++) {
       try {
-        const d=await extractInvoiceData(cur.file);
+        const d = await extractInvoiceData(cur.file);
+        if (!d.supplier && !d.amount && !d.invoiceNo) throw new Error("No fields found");
         let autoDue="";
         if(d.invoiceDate){const dt=new Date(d.invoiceDate);dt.setDate(dt.getDate()+30);autoDue=d.dueDate||dt.toISOString().split("T")[0];}
         const nd={supplier:d.supplier||"",invoiceNo:d.invoiceNo||"",invoiceDate:d.invoiceDate||"",dueDate:autoDue,amount:d.amount||"",currency:(d.currency&&CURRENCIES.includes(d.currency))?d.currency:"EUR",notes:d.notes||"",department:"Engineering",equipment:"",jobRef:"",budgetId:"",fileName:cur.file.name};
-        const doneId=cur.id;
-        setQueue(q => q.map(x => x.id===doneId?{...x,status:"done",data:nd}:x));
-      } catch(err) { const errId=cur.id; setQueue(q => q.map(x => x.id===errId?{...x,status:"error"}:x)); }
+        setQueue(q => q.map(x => x.id===curId?{...x,status:"done",data:nd,error:null}:x));
+        return;
+      } catch(err) {
+        lastErr = err;
+        if (attempt===0) await new Promise(r=>setTimeout(r,1500));
+      }
     }
+    setQueue(q => q.map(x => x.id===curId?{...x,status:"error",error:(lastErr&&lastErr.message)||"Failed"}:x));
+  };
+  const handleFiles = async (files) => {
+    const arr = Array.from(files).filter(f => f.type==="application/pdf" || f.type.startsWith("image/"));
+    if (!arr.length) return;
+    const items = arr.map(f => ({id:idRef.current++,file:f,fileName:f.name,status:"pending",error:null,data:{...emptyForm,fileName:f.name}}));
+    setQueue(items);
+    for (let i=0; i<items.length; i++) {
+      await processOne(items[i]);
+      if (i < items.length-1) await new Promise(r=>setTimeout(r,600));
+    }
+  };
+  const retryItem = async (id) => {
+    const item = queue.find(x=>x.id===id);
+    if (item) await processOne(item);
   };
   const updateField=(id,field,value)=>setQueue(q=>q.map(x=>x.id===id?{...x,data:{...x.data,[field]:value}}:x));
   const removeItem=id=>setQueue(q=>q.filter(x=>x.id!==id));
@@ -313,7 +331,7 @@ function BulkUpload({ onBack, onSubmit }) {
         <div><p style={{fontSize:20,fontWeight:700,color:"#222",margin:"0 0 2px"}}>Bulk invoice upload</p><p style={{fontSize:13,color:"#888",margin:0}}>Select multiple PDFs — fields extracted automatically</p></div>
       </div>
       {queue.length===0&&<div onDragOver={e=>{e.preventDefault();setDrag(true);}} onDragLeave={()=>setDrag(false)} onDrop={e=>{e.preventDefault();setDrag(false);handleFiles(e.dataTransfer.files);}} onClick={()=>fileRef.current.click()} style={{border:"2px dashed "+(drag?TEAL:"#ccc"),borderRadius:8,padding:"48px 20px",textAlign:"center",background:drag?TEAL_LIGHT:"#fafafa",cursor:"pointer"}}><input ref={fileRef} type="file" accept=".pdf,image/*" multiple style={{display:"none"}} onChange={e=>handleFiles(e.target.files)}/><p style={{fontSize:32,margin:"0 0 12px"}}>📂</p><p style={{fontSize:16,fontWeight:600,color:"#333",margin:"0 0 6px"}}>Drop invoices here or click to browse</p><p style={{fontSize:13,color:"#888",margin:0}}>Hold Ctrl or Cmd to select multiple</p></div>}
-      {queue.length>0&&<div><div style={{...SS.card,padding:"14px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:16}}><div style={{flex:1}}><div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6}}><span style={{color:"#555"}}>{extr>0?"Extracting "+done.length+" of "+queue.length+"...":done.length+" of "+queue.length+" extracted"}</span><span style={{fontWeight:600,color:TEAL}}>{pct+"%"}</span></div><div style={{height:6,borderRadius:3,background:"#e8e8e8",overflow:"hidden"}}><div style={{height:"100%",width:pct+"%",background:TEAL,borderRadius:3,transition:"width .3s"}}/></div></div><button style={SS.btnGs} onClick={()=>setQueue([])}>Clear all</button></div><div style={{...SS.card,marginBottom:16}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{background:"#f7f8fa"}}>{["File","Supplier","Invoice No.","Date","Amount","Cur.","Status",""].map(h=><th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:600,color:"#555",fontSize:12,borderBottom:"2px solid #e0e0e0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead><tbody>{queue.map((item,i)=><tr key={item.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"#fff":"#fafbfc"}}><td style={{padding:"8px 12px",color:"#777",fontSize:12,maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.fileName}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<input value={item.data.supplier} onChange={e=>{const v=e.target.value;updateField(item.id,"supplier",v);}} style={{...SS.inp,fontSize:13,padding:"4px 8px"}} placeholder="Supplier"/>:<span style={{color:"#aaa",fontSize:12}}>{item.status==="extracting"?"Extracting...":"Queued"}</span>}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<input value={item.data.invoiceNo} onChange={e=>{const v=e.target.value;updateField(item.id,"invoiceNo",v);}} style={{...SS.inp,fontSize:13,padding:"4px 8px"}} placeholder="INV-001"/>:<span style={{color:"#aaa",fontSize:12}}>—</span>}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<input type="date" value={item.data.invoiceDate} onChange={e=>{const d=e.target.value;let due="";if(d){const dt=new Date(d);dt.setDate(dt.getDate()+30);due=dt.toISOString().split("T")[0];}updateField(item.id,"invoiceDate",d);updateField(item.id,"dueDate",due);}} style={{...SS.inp,fontSize:13,padding:"4px 8px"}}/>:<span style={{color:"#aaa",fontSize:12}}>—</span>}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<input type="number" value={item.data.amount} onChange={e=>{const v=e.target.value;updateField(item.id,"amount",v);}} style={{...SS.inp,fontSize:13,padding:"4px 8px",width:80}} placeholder="0.00"/>:<span style={{color:"#aaa",fontSize:12}}>—</span>}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<select value={item.data.currency} onChange={e=>{const v=e.target.value;updateField(item.id,"currency",v);}} style={{...SS.inp,fontSize:13,padding:"4px 6px",width:72}}>{CURRENCIES.map(c=><option key={c}>{c}</option>)}</select>:<span style={{color:"#aaa",fontSize:12}}>—</span>}</td><td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>{item.status==="extracting"&&<span style={{fontSize:12,color:TEAL}}>Extracting...</span>}{item.status==="pending"&&<span style={{fontSize:12,color:"#aaa"}}>Queued</span>}{item.status==="done"&&<span style={{fontSize:12,color:"#2E7D32",fontWeight:500}}>Ready</span>}{item.status==="error"&&<span style={{fontSize:12,color:"#C62828"}}>Failed</span>}</td><td style={{padding:"6px 8px"}}><button onClick={()=>removeItem(item.id)} style={{...SS.btnGs,padding:"3px 8px",fontSize:12,color:"#C62828",borderColor:"#EF9A9A"}}>✕</button></td></tr>)}</tbody></table></div>{allDone&&<div style={{display:"flex",alignItems:"center",gap:12}}><button style={SS.btnT} onClick={()=>onSubmit(done)}>Submit {done.length} invoice{done.length!==1?"s":""}</button><span style={{fontSize:13,color:"#888"}}>Review fields above before submitting</span></div>}</div>}
+      {queue.length>0&&<div><div style={{...SS.card,padding:"14px 20px",marginBottom:16,display:"flex",alignItems:"center",gap:16}}><div style={{flex:1}}><div style={{display:"flex",justifyContent:"space-between",fontSize:13,marginBottom:6}}><span style={{color:"#555"}}>{extr>0?"Extracting "+done.length+" of "+queue.length+"...":done.length+" of "+queue.length+" extracted"}</span><span style={{fontWeight:600,color:TEAL}}>{pct+"%"}</span></div><div style={{height:6,borderRadius:3,background:"#e8e8e8",overflow:"hidden"}}><div style={{height:"100%",width:pct+"%",background:TEAL,borderRadius:3,transition:"width .3s"}}/></div></div><button style={SS.btnGs} onClick={()=>setQueue([])}>Clear all</button></div><div style={{...SS.card,marginBottom:16}}><table style={{width:"100%",borderCollapse:"collapse",fontSize:13}}><thead><tr style={{background:"#f7f8fa"}}>{["File","Supplier","Invoice No.","Date","Amount","Cur.","Status",""].map(h=><th key={h} style={{padding:"10px 12px",textAlign:"left",fontWeight:600,color:"#555",fontSize:12,borderBottom:"2px solid #e0e0e0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead><tbody>{queue.map((item,i)=><tr key={item.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"#fff":"#fafbfc"}}><td style={{padding:"8px 12px",color:"#777",fontSize:12,maxWidth:100,overflow:"hidden",textOverflow:"ellipsis",whiteSpace:"nowrap"}}>{item.fileName}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<input value={item.data.supplier} onChange={e=>{const v=e.target.value;updateField(item.id,"supplier",v);}} style={{...SS.inp,fontSize:13,padding:"4px 8px"}} placeholder="Supplier"/>:<span style={{color:"#aaa",fontSize:12}}>{item.status==="extracting"?"Extracting...":"Queued"}</span>}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<input value={item.data.invoiceNo} onChange={e=>{const v=e.target.value;updateField(item.id,"invoiceNo",v);}} style={{...SS.inp,fontSize:13,padding:"4px 8px"}} placeholder="INV-001"/>:<span style={{color:"#aaa",fontSize:12}}>—</span>}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<input type="date" value={item.data.invoiceDate} onChange={e=>{const d=e.target.value;let due="";if(d){const dt=new Date(d);dt.setDate(dt.getDate()+30);due=dt.toISOString().split("T")[0];}updateField(item.id,"invoiceDate",d);updateField(item.id,"dueDate",due);}} style={{...SS.inp,fontSize:13,padding:"4px 8px"}}/>:<span style={{color:"#aaa",fontSize:12}}>—</span>}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<input type="number" value={item.data.amount} onChange={e=>{const v=e.target.value;updateField(item.id,"amount",v);}} style={{...SS.inp,fontSize:13,padding:"4px 8px",width:80}} placeholder="0.00"/>:<span style={{color:"#aaa",fontSize:12}}>—</span>}</td><td style={{padding:"6px 8px"}}>{item.status==="done"?<select value={item.data.currency} onChange={e=>{const v=e.target.value;updateField(item.id,"currency",v);}} style={{...SS.inp,fontSize:13,padding:"4px 6px",width:72}}>{CURRENCIES.map(c=><option key={c}>{c}</option>)}</select>:<span style={{color:"#aaa",fontSize:12}}>—</span>}</td><td style={{padding:"10px 12px",whiteSpace:"nowrap"}}>{item.status==="extracting"&&<span style={{fontSize:12,color:TEAL}}>Extracting...</span>}{item.status==="pending"&&<span style={{fontSize:12,color:"#aaa"}}>Queued</span>}{item.status==="done"&&<span style={{fontSize:12,color:"#2E7D32",fontWeight:500}}>Ready</span>}{item.status==="error"&&<span style={{fontSize:12,color:"#C62828",display:"inline-flex",alignItems:"center",gap:6}} title={item.error||"Failed"}>Failed <button onClick={()=>retryItem(item.id)} style={{...SS.btnGs,padding:"2px 8px",fontSize:11}}>Retry</button></span>}</td><td style={{padding:"6px 8px"}}><button onClick={()=>removeItem(item.id)} style={{...SS.btnGs,padding:"3px 8px",fontSize:12,color:"#C62828",borderColor:"#EF9A9A"}}>✕</button></td></tr>)}</tbody></table></div>{allDone&&<div style={{display:"flex",alignItems:"center",gap:12}}><button style={SS.btnT} onClick={()=>onSubmit(done)}>Submit {done.length} invoice{done.length!==1?"s":""}</button><span style={{fontSize:13,color:"#888"}}>Review fields above before submitting</span></div>}</div>}
     </div>
   );
 }
