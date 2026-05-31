@@ -505,7 +505,7 @@ export default function App() {
       const d = await extractInvoiceData(f);
       let autoDue = "";
       if (d.invoiceDate) { const dt=new Date(d.invoiceDate); dt.setDate(dt.getDate()+30); autoDue=d.dueDate||dt.toISOString().split("T")[0]; }
-      setForm(p => ({...p, fileName:f.name, supplier:d.supplier||p.supplier, invoiceNo:d.invoiceNo||p.invoiceNo, invoiceDate:d.invoiceDate||p.invoiceDate, dueDate:autoDue||p.dueDate, amount:d.amount||p.amount, currency:d.currency&&CURRENCIES.includes(d.currency)?d.currency:p.currency, notes:d.notes||p.notes}));
+    setForm(p => ({...p, fileName:f.name, supplier:d.supplier||p.supplier, invoiceNo:d.invoiceNo||p.invoiceNo, invoiceDate:d.invoiceDate||p.invoiceDate, dueDate:autoDue||p.dueDate, amount:d.amount||p.amount, currency:(d.currency && CURRENCIES.includes(d.currency)) ? d.currency : p.currency, notes:d.notes||p.notes}));
       if (d.language) setLang(d.language);
     } catch(e) { setForm(p => ({...p, fileName:f.name})); }
     setExtr(false);
