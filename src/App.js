@@ -134,7 +134,7 @@ function DropZone({ onFile, fileName, extracting }) {
   );
 }
 
-function InvoiceTable({ invoices, budgets, onStatus, showActions }) {
+function InvoiceTable({ invoices, budgets, onStatus, showActions, onEdit }) {
   return (
     <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
       <thead><tr style={{background:"#f7f8fa"}}>{["Supplier","Invoice No.","Invoice Date","Amount","Status","Actions"].map(h => <th key={h} style={{padding:"11px 16px",textAlign:"left",fontWeight:600,color:"#555",fontSize:13,borderBottom:"2px solid #e0e0e0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
@@ -151,6 +151,7 @@ function InvoiceTable({ invoices, budgets, onStatus, showActions }) {
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {showActions && inv.status==="Pending" && <><button style={SS.btnTs} onClick={()=>onStatus(inv.id,"Approved")}>✓ Approve</button><button style={{...SS.btnGs,color:"#C62828",borderColor:"#EF9A9A"}} onClick={()=>onStatus(inv.id,"Rejected")}>✕ Reject</button></>}
                 {showActions && inv.status!=="Pending" && <button style={SS.btnGs} onClick={()=>onStatus(inv.id,"Pending")}>↺ Reset</button>}
+                {onEdit && <button style={SS.btnGs} onClick={()=>onEdit(inv)}>✏️ Edit</button>}
                 {inv.status==="Approved" && <button onClick={()=>downloadInvoicePDF(inv,budgets)} style={{...SS.btnGs,color:"#2E7D32",borderColor:"#A5D6A7",fontSize:12,padding:"4px 10px"}}>⬇ Sage</button>}
               </div>
             </td>
@@ -158,6 +159,59 @@ function InvoiceTable({ invoices, budgets, onStatus, showActions }) {
         ))}
       </tbody>
     </table>
+  );
+}
+
+function EditInvoiceModal({ inv, budgets, onSave, onClose }) {
+  const [notes, setNotes] = useState(inv.notes || "");
+  const [budgetId, setBudgetId] = useState(inv.budget_id || inv.budgetId || "");
+  const [department, setDepartment] = useState(inv.department || "Engineering");
+  const [equipment, setEquipment] = useState(inv.equipment || "");
+  const [jobRef, setJobRef] = useState(inv.job_ref || inv.jobRef || "");
+  const [saving, setSaving] = useState(false);
+  const save = async () => {
+    setSaving(true);
+    await onSave(inv.id, {notes, budget_id:budgetId||null, department, equipment:equipment||null, job_ref:jobRef||null});
+    setSaving(false);
+    onClose();
+  };
+  const lockRow = (label, value) => (
+    <div style={{display:"flex",justifyContent:"space-between",padding:"7px 0",fontSize:13,borderBottom:"1px solid #f3f3f3"}}>
+      <span style={{color:"#888"}}>{label}</span><span style={{fontWeight:600,color:"#444"}}>{value}</span>
+    </div>
+  );
+  return (
+    <div onClick={onClose} style={{position:"fixed",inset:0,background:"rgba(0,0,0,0.4)",zIndex:500,display:"flex",alignItems:"flex-start",justifyContent:"center",padding:"5vh 16px",overflowY:"auto"}}>
+      <div onClick={e=>e.stopPropagation()} style={{background:"#fff",borderRadius:8,width:"100%",maxWidth:480,boxShadow:"0 12px 40px rgba(0,0,0,0.2)"}}>
+        <div style={{padding:"18px 22px",borderBottom:"1px solid #eee",display:"flex",justifyContent:"space-between",alignItems:"center"}}>
+          <p style={{fontSize:17,fontWeight:700,color:"#222",margin:0}}>Edit invoice</p>
+          <button onClick={onClose} style={{background:"none",border:"none",fontSize:20,color:"#aaa",cursor:"pointer",lineHeight:1}}>×</button>
+        </div>
+        <div style={{padding:"18px 22px"}}>
+          <div style={{background:"#f7f9fc",border:"1px solid #e5e9ef",borderRadius:6,padding:"10px 14px",marginBottom:18}}>
+            <p style={{fontSize:11,fontWeight:600,color:"#999",textTransform:"uppercase",letterSpacing:"0.05em",margin:"0 0 6px"}}>🔒 Figures locked (as approved for accounts)</p>
+            {lockRow("Supplier", inv.supplier)}
+            {lockRow("Invoice no.", inv.invoice_no||inv.invoiceNo||"—")}
+            {lockRow("Invoice date", inv.invoice_date||inv.invoiceDate||"—")}
+            {lockRow("Due date", inv.due_date||inv.dueDate||"—")}
+            {lockRow("Amount", inv.currency+" "+fmt(inv.amount))}
+          </div>
+          <div style={{display:"flex",flexDirection:"column",gap:14}}>
+            <div style={{display:"grid",gridTemplateColumns:"1fr 1fr",gap:12}}>
+              <div><Lbl>Department</Lbl><select value={department} onChange={e=>setDepartment(e.target.value)} style={SS.inp}>{DEPARTMENTS.map(d=><option key={d}>{d}</option>)}</select></div>
+              <div><Lbl>Job reference</Lbl><input value={jobRef} placeholder="e.g. JR-001" onChange={e=>setJobRef(e.target.value)} style={SS.inp}/></div>
+            </div>
+            <div><Lbl>Equipment</Lbl><select value={equipment} onChange={e=>setEquipment(e.target.value)} style={SS.inp}><option value="">— None —</option>{EQUIPMENT.filter(e=>e).map(eq=><option key={eq}>{eq}</option>)}</select></div>
+            <div><Lbl>Assign to budget</Lbl><select value={budgetId} onChange={e=>setBudgetId(e.target.value)} style={SS.inp}><option value="">— None —</option>{budgets.map(b=><option key={b.id} value={b.id}>{b.name}</option>)}</select></div>
+            <div><Lbl>Notes</Lbl><textarea value={notes} rows={3} placeholder="Additional details…" onChange={e=>setNotes(e.target.value)} style={{...SS.inp,resize:"vertical",lineHeight:1.5}}/></div>
+          </div>
+        </div>
+        <div style={{padding:"16px 22px",borderTop:"1px solid #eee",display:"flex",gap:10,justifyContent:"flex-end"}}>
+          <button style={SS.btnG} onClick={onClose} disabled={saving}>Cancel</button>
+          <button style={SS.btnT} onClick={save} disabled={saving}>{saving?"Saving…":"Save changes"}</button>
+        </div>
+      </div>
+    </div>
   );
 }
 
@@ -356,6 +410,7 @@ export default function App() {
   const [notifs,setNotifs]=useState([]);
   const [showN,setShowN]=useState(false);
   const [loading,setLoading]=useState(false);
+  const [editInv,setEditInv]=useState(null);
   const nRef=useRef();
   const nId=useRef(100);
 
@@ -371,6 +426,8 @@ export default function App() {
   const markR=()=>setNotifs(p=>p.map(n=>n.role===role?{...n,read:true}:n));
 
   const updateStatus=async(id,status)=>{await supabase.from("invoices").update({status}).eq("id",id);await supabase.from("audit_log").insert([{invoice_id:id,action:status,performed_by:userName}]);setInv(p=>p.map(i=>i.id===id?{...i,status}:i));const inv=invoices.find(i=>i.id===id);if(inv)push("CE","Invoice "+(inv.invoice_no||inv.invoiceNo)+" has been "+status.toLowerCase());};
+
+  const saveInvoiceEdit=async(id,fields)=>{const orig=invoices.find(i=>i.id===id)||{};const changed=Object.keys(fields).filter(k=>(fields[k]||"")!==((orig[k]!=null?orig[k]:"")||"")).join(", ");await supabase.from("invoices").update(fields).eq("id",id);await supabase.from("audit_log").insert([{invoice_id:id,action:"Edited"+(changed?": "+changed:""),performed_by:userName}]);setInv(p=>p.map(i=>i.id===id?{...i,...fields}:i));};
 
   const handleFile=async f=>{setExtr(true);setLang(null);try{const d=await extractInvoiceData(f);let autoDue="";if(d.invoiceDate){const dt=new Date(d.invoiceDate);dt.setDate(dt.getDate()+30);autoDue=d.dueDate||dt.toISOString().split("T")[0];}setForm(p=>({...p,fileName:f.name,supplier:d.supplier||p.supplier,invoiceNo:d.invoiceNo||p.invoiceNo,invoiceDate:d.invoiceDate||p.invoiceDate,dueDate:autoDue||p.dueDate,amount:d.amount||p.amount,currency:(d.currency&&CURRENCIES.includes(d.currency))?d.currency:p.currency,notes:d.notes||p.notes}));if(d.language)setLang(d.language);}catch(e){setForm(p=>({...p,fileName:f.name}));}setExtr(false);};
 
@@ -393,6 +450,7 @@ export default function App() {
 
   return (
     <div style={{fontFamily:"'Inter','Segoe UI',Arial,sans-serif",background:"#f4f6f8",minHeight:"100vh"}}>
+      {editInv&&<EditInvoiceModal inv={editInv} budgets={budgets} onSave={saveInvoiceEdit} onClose={()=>setEditInv(null)}/>}
       <div style={{background:"#fff",borderBottom:"1px solid #dde1e7",padding:"0 24px",display:"flex",alignItems:"center",justifyContent:"space-between",height:54}}>
         <span style={{fontSize:18,fontWeight:700,color:TEAL}}>INVOICE PLATFORM</span>
         <div style={{display:"flex",alignItems:"center",gap:12}}>
@@ -423,7 +481,7 @@ export default function App() {
               <input placeholder="🔍 Search supplier, invoice no., job ref…" value={search} onChange={e=>setSearch(e.target.value)} style={{...SS.inp,flex:1,minWidth:180}}/>
               <div style={{display:"flex",gap:6}}>{["All","Pending","Approved","Rejected"].map(s=><button key={s} onClick={()=>setFS(s)} style={fStatus===s?SS.btnTs:SS.btnGs}>{s}</button>)}<button onClick={()=>setSortOrder(o=>o==="desc"?"asc":"desc")} style={{...SS.btnGs,fontSize:12}}>{sortOrder==="desc"?"📅 Newest first":"📅 Oldest first"}</button></div>
             </div>
-            <InvoiceTable invoices={filtered} budgets={budgets} onStatus={updateStatus} showActions={true}/>
+            <InvoiceTable invoices={filtered} budgets={budgets} onStatus={updateStatus} showActions={true} onEdit={setEditInv}/>
             <div style={{padding:"10px 16px",borderTop:"1px solid #f0f0f0"}}><span style={{fontSize:13,color:"#888"}}>{filtered.length+" invoice"+(filtered.length!==1?"s":"")+" shown"}</span></div>
           </div>
         </div>}
@@ -473,11 +531,11 @@ export default function App() {
                   <div style={{textAlign:"right",flexShrink:0}}><p style={{fontSize:20,fontWeight:700,color:"#222",margin:"0 0 3px"}}>{inv.currency+" "+fmt(inv.amount)}</p>{budget&&<p style={{fontSize:12,color:"#888",margin:0}}>{budget.name}</p>}</div>
                 </div>
                 {inv.notes&&<p style={{fontSize:13,color:"#555",padding:"9px 12px",background:"#f7f8fa",borderRadius:4,borderLeft:"3px solid #dde1e7",margin:"12px 0 0"}}>{inv.notes}</p>}
-                <div style={{display:"flex",gap:8,marginTop:14}}><button style={SS.btnTs} onClick={()=>updateStatus(inv.id,"Approved")}>✓ Approve</button><button style={{...SS.btnGs,color:"#C62828",borderColor:"#EF9A9A"}} onClick={()=>updateStatus(inv.id,"Rejected")}>✕ Reject</button></div>
+                <div style={{display:"flex",gap:8,marginTop:14}}><button style={SS.btnTs} onClick={()=>updateStatus(inv.id,"Approved")}>✓ Approve</button><button style={{...SS.btnGs,color:"#C62828",borderColor:"#EF9A9A"}} onClick={()=>updateStatus(inv.id,"Rejected")}>✕ Reject</button><button style={SS.btnGs} onClick={()=>setEditInv(inv)}>✏️ Edit</button></div>
               </div>
             </div>
           );})}
-          {invoices.filter(i=>i.status==="Approved").length>0&&<div><p style={{fontSize:13,fontWeight:600,color:"#888",textTransform:"uppercase",letterSpacing:"0.05em",margin:"24px 0 10px"}}>Approved — ready for Sage</p><div style={SS.card}><InvoiceTable invoices={invoices.filter(i=>i.status==="Approved")} budgets={budgets} onStatus={updateStatus} showActions={false}/></div></div>}
+          {invoices.filter(i=>i.status==="Approved").length>0&&<div><p style={{fontSize:13,fontWeight:600,color:"#888",textTransform:"uppercase",letterSpacing:"0.05em",margin:"24px 0 10px"}}>Approved — ready for Sage</p><div style={SS.card}><InvoiceTable invoices={invoices.filter(i=>i.status==="Approved")} budgets={budgets} onStatus={updateStatus} showActions={false} onEdit={setEditInv}/></div></div>}
           {invoices.filter(i=>i.status==="Rejected").length>0&&<div><p style={{fontSize:13,fontWeight:600,color:"#888",textTransform:"uppercase",letterSpacing:"0.05em",margin:"20px 0 10px"}}>Rejected</p><div style={SS.card}><InvoiceTable invoices={invoices.filter(i=>i.status==="Rejected")} budgets={budgets} onStatus={updateStatus} showActions={true}/></div></div>}
         </div>}
       </div>
