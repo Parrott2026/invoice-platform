@@ -101,9 +101,10 @@ function LoginScreen({ onLogin }) {
   );
 }
 
-function Badge({ status }) {
+function Badge({ status, viewerRole }) {
   const s = ST[status];
-  return <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:4,fontSize:13,fontWeight:500,background:s.bg,color:s.color,border:"1px solid "+s.border,whiteSpace:"nowrap"}}>{status}</span>;
+  const label = (status==="Pending" && viewerRole==="CE") ? "Submitted" : status;
+  return <span style={{display:"inline-flex",alignItems:"center",gap:5,padding:"4px 10px",borderRadius:4,fontSize:13,fontWeight:500,background:s.bg,color:s.color,border:"1px solid "+s.border,whiteSpace:"nowrap"}}>{label}</span>;
 }
 function Lbl({ children, required }) {
   return <label style={{display:"block",fontSize:13,fontWeight:500,color:"#444",marginBottom:5}}>{children}{required && <span style={{color:"#C62828",marginLeft:2}}>*</span>}</label>;
@@ -134,7 +135,7 @@ function DropZone({ onFile, fileName, extracting }) {
   );
 }
 
-function InvoiceTable({ invoices, budgets, onStatus, showActions, onEdit }) {
+function InvoiceTable({ invoices, budgets, onStatus, showActions, onEdit, viewerRole }) {
   return (
     <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
       <thead><tr style={{background:"#f7f8fa"}}>{["Supplier","Invoice No.","Invoice Date","Amount","Status","Actions"].map(h => <th key={h} style={{padding:"11px 16px",textAlign:"left",fontWeight:600,color:"#555",fontSize:13,borderBottom:"2px solid #e0e0e0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
@@ -146,7 +147,7 @@ function InvoiceTable({ invoices, budgets, onStatus, showActions, onEdit }) {
             <td style={{padding:"13px 16px",color:"#555"}}>{inv.invoice_no||inv.invoiceNo}</td>
             <td style={{padding:"13px 16px",color:"#555"}}>{(function(d){if(!d)return "—";var p=String(d).split("-");return p.length===3?p[2]+"."+p[1]+"."+p[0]:d;})(inv.invoice_date||inv.invoiceDate)}</td>
             <td style={{padding:"13px 16px",fontWeight:600}}>{inv.currency} {fmt(inv.amount)}</td>
-            <td style={{padding:"13px 16px"}}><Badge status={inv.status}/></td>
+            <td style={{padding:"13px 16px"}}><Badge status={inv.status} viewerRole={viewerRole}/></td>
             <td style={{padding:"10px 16px"}}>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
                 {showActions && inv.status==="Pending" && <><button style={SS.btnTs} onClick={()=>onStatus(inv.id,"Approved")}>✓ Approve</button><button style={{...SS.btnGs,color:"#C62828",borderColor:"#EF9A9A"}} onClick={()=>onStatus(inv.id,"Rejected")}>✕ Reject</button></>}
@@ -475,13 +476,13 @@ export default function App() {
             <div><p style={{fontSize:20,fontWeight:700,color:"#222",margin:"0 0 2px"}}>Invoice tracker</p><p style={{fontSize:13,color:"#888",margin:0}}>{role==="CE"?"Chief engineer":"Captain"}</p></div>
             {role==="CE"&&<div style={{display:"flex",gap:8}}><button style={SS.btnT} onClick={()=>setView("upload")}>+ New invoice</button><button style={SS.btnO} onClick={()=>setBulk(true)}>📂 Bulk upload</button></div>}
           </div>
-          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:20}}>{["Pending","Approved","Rejected"].map((s,i)=>{const total=invoices.filter(x=>x.status===s).reduce((t,x)=>t+parseFloat(x.amount||0),0);return <StatCard key={s} label={s} value={invoices.filter(x=>x.status===s).length} sub={"EUR "+fmt(total)} accent={["#FF9800","#4CAF50","#F44336"][i]}/>;})}</div>
+          <div style={{display:"grid",gridTemplateColumns:"repeat(3,1fr)",gap:16,marginBottom:20}}>{["Pending","Approved","Rejected"].map((s,i)=>{const total=invoices.filter(x=>x.status===s).reduce((t,x)=>t+parseFloat(x.amount||0),0);return <StatCard key={s} label={s==="Pending"&&role==="CE"?"Submitted":s} value={invoices.filter(x=>x.status===s).length} sub={"EUR "+fmt(total)} accent={["#FF9800","#4CAF50","#F44336"][i]}/>;})}</div>
           <div style={SS.card}>
             <div style={{padding:"14px 16px",borderBottom:"1px solid #f0f0f0",display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
               <input placeholder="🔍 Search supplier, invoice no., job ref…" value={search} onChange={e=>setSearch(e.target.value)} style={{...SS.inp,flex:1,minWidth:180}}/>
               <div style={{display:"flex",gap:6}}>{["All","Pending","Approved","Rejected"].map(s=><button key={s} onClick={()=>setFS(s)} style={fStatus===s?SS.btnTs:SS.btnGs}>{s}</button>)}<button onClick={()=>setSortOrder(o=>o==="desc"?"asc":"desc")} style={{...SS.btnGs,fontSize:12}}>{sortOrder==="desc"?"📅 Newest first":"📅 Oldest first"}</button></div>
             </div>
-            <InvoiceTable invoices={filtered} budgets={budgets} onStatus={updateStatus} showActions={true} onEdit={setEditInv}/>
+            <InvoiceTable invoices={filtered} budgets={budgets} onStatus={updateStatus} showActions={true} onEdit={setEditInv} viewerRole={role}/>
             <div style={{padding:"10px 16px",borderTop:"1px solid #f0f0f0"}}><span style={{fontSize:13,color:"#888"}}>{filtered.length+" invoice"+(filtered.length!==1?"s":"")+" shown"}</span></div>
           </div>
         </div>}
