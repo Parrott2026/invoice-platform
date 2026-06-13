@@ -53,6 +53,12 @@ async function extractInvoiceData(file) {
   return parsed;
 }
 
+async function getSignedUrl(path, opts){ if(!path) return null; const { data, error } = await supabase.storage.from("invoices").createSignedUrl(path, 3600, opts); return (error||!data) ? null : data.signedUrl; }
+async function viewDocument(inv){ const u = await getSignedUrl(inv.pdf_path); if(u) window.open(u, "_blank"); else alert("Document not available"); }
+async function downloadDocument(inv){ const name = inv.file_name || ((inv.invoice_no||inv.invoiceNo||"invoice")+".pdf"); const u = await getSignedUrl(inv.pdf_path, { download: name }); if(!u){ alert("Document not available"); return; } const a=document.createElement("a"); a.href=u; a.download=name; document.body.appendChild(a); a.click(); a.remove(); }
+function loadJSZip(){ return window.JSZip ? Promise.resolve(window.JSZip) : new Promise((res,rej)=>{ const s=document.createElement("script"); s.src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"; s.onload=()=>res(window.JSZip); s.onerror=rej; document.head.appendChild(s); }); }
+async function bulkDownload(invs){ const list=invs.filter(i=>i.pdf_path); if(!list.length){ alert("None of the selected invoices have an attached document."); return; } const JSZip=await loadJSZip(); const zip=new JSZip(); for(const inv of list){ const u=await getSignedUrl(inv.pdf_path); if(!u) continue; try{ const blob=await (await fetch(u)).blob(); const ext=(inv.pdf_path.split(".").pop()||"pdf").slice(0,5); const base=((inv.invoice_no||inv.invoiceNo||"invoice")+"-"+(inv.supplier||"")).replace(/[^\w.\-]+/g,"_").slice(0,80); zip.file(base+"."+ext, blob); }catch(e){} } const out=await zip.generateAsync({type:"blob"}); const url=URL.createObjectURL(out); const a=document.createElement("a"); a.href=url; a.download="invoices-"+new Date().toISOString().slice(0,10)+".zip"; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url); }
+
 function LoginScreen({ onLogin }) {
   const [selected, setSelected] = useState(null);
   const [pin, setPin] = useState("");
@@ -135,14 +141,15 @@ function DropZone({ onFile, fileName, extracting }) {
   );
 }
 
-function InvoiceTable({ invoices, budgets, onStatus, showActions, onEdit, viewerRole }) {
+function InvoiceTable({ invoices, budgets, onStatus, showActions, onEdit, viewerRole, selectable, selectedIds, onToggleSelect, onToggleAll }) {
   return (
     <table style={{width:"100%",borderCollapse:"collapse",fontSize:14}}>
-      <thead><tr style={{background:"#f7f8fa"}}>{["Supplier","Invoice No.","Invoice Date","Amount","Status","Actions"].map(h => <th key={h} style={{padding:"11px 16px",textAlign:"left",fontWeight:600,color:"#555",fontSize:13,borderBottom:"2px solid #e0e0e0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
+      <thead><tr style={{background:"#f7f8fa"}}>{selectable&&<th style={{padding:"11px 16px",borderBottom:"2px solid #e0e0e0",width:36}}><input type="checkbox" checked={invoices.length>0&&invoices.every(x=>selectedIds.includes(x.id))} onChange={onToggleAll} style={{width:16,height:16,cursor:"pointer"}}/></th>}{["Supplier","Invoice No.","Invoice Date","Amount","Status","Actions"].map(h => <th key={h} style={{padding:"11px 16px",textAlign:"left",fontWeight:600,color:"#555",fontSize:13,borderBottom:"2px solid #e0e0e0",whiteSpace:"nowrap"}}>{h}</th>)}</tr></thead>
       <tbody>
-        {invoices.length===0 && <tr><td colSpan={6} style={{padding:"2.5rem",textAlign:"center",color:"#999"}}>No invoices found</td></tr>}
+        {invoices.length===0 && <tr><td colSpan={selectable?7:6} style={{padding:"2.5rem",textAlign:"center",color:"#999"}}>No invoices found</td></tr>}
         {invoices.map((inv,i) => (
           <tr key={inv.id} style={{borderBottom:"1px solid #f0f0f0",background:i%2===0?"#fff":"#fafbfc"}}>
+            {selectable&&<td style={{padding:"10px 16px"}}><input type="checkbox" checked={selectedIds.includes(inv.id)} onChange={()=>onToggleSelect(inv.id)} style={{width:16,height:16,cursor:"pointer"}}/></td>}
             <td style={{padding:"13px 16px",fontWeight:600,color:"#222"}}>{inv.supplier}</td>
             <td style={{padding:"13px 16px",color:"#555"}}>{inv.invoice_no||inv.invoiceNo}</td>
             <td style={{padding:"13px 16px",color:"#555"}}>{(function(d){if(!d)return "—";var p=String(d).split("-");return p.length===3?p[2]+"."+p[1]+"."+p[0]:d;})(inv.invoice_date||inv.invoiceDate)}</td>
@@ -150,6 +157,7 @@ function InvoiceTable({ invoices, budgets, onStatus, showActions, onEdit, viewer
             <td style={{padding:"13px 16px"}}><Badge status={inv.status} viewerRole={viewerRole}/></td>
             <td style={{padding:"10px 16px"}}>
               <div style={{display:"flex",gap:6,flexWrap:"wrap"}}>
+                {inv.pdf_path && <><button style={{...SS.btnGs,fontSize:12,padding:"4px 10px"}} onClick={()=>viewDocument(inv)}>📄 View</button><button style={{...SS.btnGs,fontSize:12,padding:"4px 10px"}} onClick={()=>downloadDocument(inv)}>⬇ PDF</button></>}
                 {showActions && inv.status==="Pending" && <><button style={SS.btnTs} onClick={()=>onStatus(inv.id,"Approved")}>✓ Approve</button><button style={{...SS.btnGs,color:"#C62828",borderColor:"#EF9A9A"}} onClick={()=>onStatus(inv.id,"Rejected")}>✕ Reject</button></>}
                 {showActions && inv.status!=="Pending" && <button style={SS.btnGs} onClick={()=>onStatus(inv.id,"Pending")}>↺ Reset</button>}
                 {onEdit && <button style={SS.btnGs} onClick={()=>onEdit(inv)}>✏️ Edit</button>}
@@ -412,6 +420,8 @@ export default function App() {
   const [showN,setShowN]=useState(false);
   const [loading,setLoading]=useState(false);
   const [editInv,setEditInv]=useState(null);
+  const [pendingFile,setPendingFile]=useState(null);
+  const [selectedIds,setSelectedIds]=useState([]);
   const nRef=useRef();
   const nId=useRef(100);
 
@@ -430,19 +440,21 @@ export default function App() {
 
   const saveInvoiceEdit=async(id,fields)=>{const orig=invoices.find(i=>i.id===id)||{};const changed=Object.keys(fields).filter(k=>(fields[k]||"")!==((orig[k]!=null?orig[k]:"")||"")).join(", ");await supabase.from("invoices").update(fields).eq("id",id);await supabase.from("audit_log").insert([{invoice_id:id,action:"Edited"+(changed?": "+changed:""),performed_by:userName}]);setInv(p=>p.map(i=>i.id===id?{...i,...fields}:i));};
 
-  const handleFile=async f=>{setExtr(true);setLang(null);try{const d=await extractInvoiceData(f);let autoDue="";if(d.invoiceDate){const dt=new Date(d.invoiceDate);dt.setDate(dt.getDate()+30);autoDue=d.dueDate||dt.toISOString().split("T")[0];}setForm(p=>({...p,fileName:f.name,supplier:d.supplier||p.supplier,invoiceNo:d.invoiceNo||p.invoiceNo,invoiceDate:d.invoiceDate||p.invoiceDate,dueDate:autoDue||p.dueDate,amount:d.amount||p.amount,currency:(d.currency&&CURRENCIES.includes(d.currency))?d.currency:p.currency,notes:d.notes||p.notes}));if(d.language)setLang(d.language);}catch(e){setForm(p=>({...p,fileName:f.name}));}setExtr(false);};
+  const handleFile=async f=>{setExtr(true);setLang(null);setPendingFile(f);try{const d=await extractInvoiceData(f);let autoDue="";if(d.invoiceDate){const dt=new Date(d.invoiceDate);dt.setDate(dt.getDate()+30);autoDue=d.dueDate||dt.toISOString().split("T")[0];}setForm(p=>({...p,fileName:f.name,supplier:d.supplier||p.supplier,invoiceNo:d.invoiceNo||p.invoiceNo,invoiceDate:d.invoiceDate||p.invoiceDate,dueDate:autoDue||p.dueDate,amount:d.amount||p.amount,currency:(d.currency&&CURRENCIES.includes(d.currency))?d.currency:p.currency,notes:d.notes||p.notes}));if(d.language)setLang(d.language);}catch(e){setForm(p=>({...p,fileName:f.name}));}setExtr(false);};
 
   const validate=()=>{const e={};if(!form.supplier.trim())e.supplier=true;if(!form.invoiceNo.trim())e.invoiceNo=true;if(!form.invoiceDate)e.invoiceDate=true;if(!form.dueDate)e.dueDate=true;if(!form.amount||isNaN(form.amount)||parseFloat(form.amount)<=0)e.amount=true;return e;};
 
-  const submitInvoice=async()=>{const e=validate();setErr(e);if(Object.keys(e).length)return;const res=await supabase.from("invoices").insert([{supplier:form.supplier,invoice_no:form.invoiceNo,invoice_date:form.invoiceDate,due_date:form.dueDate,amount:parseFloat(form.amount),currency:form.currency,department:form.department,equipment:form.equipment||null,job_ref:form.jobRef||null,notes:form.notes||null,file_name:form.fileName||null,budget_id:form.budgetId||null,status:"Pending",created_by:userName}]).select();if(res.data&&res.data[0]){setInv(p=>[res.data[0],...p]);push("Captain","New invoice from "+form.supplier+" awaiting approval");setSub(true);}};
+  const submitInvoice=async()=>{const e=validate();setErr(e);if(Object.keys(e).length)return;let pdf_path=null;if(pendingFile){const path=(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random().toString(36).slice(2))+"/"+(pendingFile.name||"file.pdf").replace(/[^\w.\-]+/g,"_");const up=await supabase.storage.from("invoices").upload(path,pendingFile,{contentType:pendingFile.type||"application/pdf",upsert:false});if(!up.error)pdf_path=path;}const res=await supabase.from("invoices").insert([{supplier:form.supplier,invoice_no:form.invoiceNo,invoice_date:form.invoiceDate,due_date:form.dueDate,amount:parseFloat(form.amount),currency:form.currency,department:form.department,equipment:form.equipment||null,job_ref:form.jobRef||null,notes:form.notes||null,file_name:form.fileName||null,pdf_path:pdf_path,budget_id:form.budgetId||null,status:"Pending",created_by:userName}]).select();if(res.data&&res.data[0]){setInv(p=>[res.data[0],...p]);push("Captain","New invoice from "+form.supplier+" awaiting approval");setSub(true);}};
 
-  const resetForm=()=>{setForm(emptyForm);setErr({});setSub(false);setLang(null);};
+  const resetForm=()=>{setForm(emptyForm);setErr({});setSub(false);setLang(null);setPendingFile(null);};
 
-  const submitBulk=async(done)=>{const inserts=done.map(x=>({supplier:x.data.supplier,invoice_no:x.data.invoiceNo,invoice_date:x.data.invoiceDate||null,due_date:x.data.dueDate||null,amount:parseFloat(x.data.amount)||0,currency:x.data.currency,department:x.data.department,equipment:x.data.equipment||null,job_ref:x.data.jobRef||null,notes:x.data.notes||null,file_name:x.data.fileName||null,budget_id:x.data.budgetId||null,status:"Pending",created_by:userName}));const res=await supabase.from("invoices").insert(inserts).select();if(res.data)setInv(p=>[...res.data,...p]);push("Captain",done.length+" new invoice"+(done.length!==1?"s":"")+" awaiting approval");setBulk(false);setView("tracker");};
+  const submitBulk=async(done)=>{const inserts=[];for(const x of done){let pdf_path=null;if(x.file){const path=(crypto.randomUUID?crypto.randomUUID():Date.now()+"-"+Math.random().toString(36).slice(2))+"/"+((x.file.name||"file.pdf").replace(/[^\w.\-]+/g,"_"));const up=await supabase.storage.from("invoices").upload(path,x.file,{contentType:x.file.type||"application/pdf",upsert:false});if(!up.error)pdf_path=path;}inserts.push({supplier:x.data.supplier,invoice_no:x.data.invoiceNo,invoice_date:x.data.invoiceDate||null,due_date:x.data.dueDate||null,amount:parseFloat(x.data.amount)||0,currency:x.data.currency,department:x.data.department,equipment:x.data.equipment||null,job_ref:x.data.jobRef||null,notes:x.data.notes||null,file_name:x.data.fileName||null,pdf_path:pdf_path,budget_id:x.data.budgetId||null,status:"Pending",created_by:userName});}const res=await supabase.from("invoices").insert(inserts).select();if(res.data)setInv(p=>[...res.data,...p]);push("Captain",done.length+" new invoice"+(done.length!==1?"s":"")+" awaiting approval");setBulk(false);setView("tracker");};
 
   const [sortOrder,setSortOrder]=useState("desc");
   const filtered=invoices.filter(i=>{const ms=fStatus==="All"||i.status===fStatus;const q=search.toLowerCase();return ms&&(!q||i.supplier.toLowerCase().includes(q)||(i.invoice_no||"").toLowerCase().includes(q)||(i.job_ref||"").toLowerCase().includes(q));}).sort((a,b)=>{const da=new Date(a.invoice_date||a.invoiceDate||0);const db=new Date(b.invoice_date||b.invoiceDate||0);return sortOrder==="desc"?db-da:da-db;});
   const pending=invoices.filter(i=>i.status==="Pending");
+  const toggleSelect=id=>setSelectedIds(p=>p.includes(id)?p.filter(x=>x!==id):[...p,id]);
+  const toggleSelectAll=(list)=>setSelectedIds(p=>list.every(x=>p.includes(x.id))?p.filter(id=>!list.some(x=>x.id===id)):[...new Set([...p,...list.map(x=>x.id)])]);
   const lF={English:"🇬🇧",Italian:"🇮🇹",French:"🇫🇷"};
   const F=(field,label,type="text",ph="",req=false)=>(<div><Lbl required={req}>{label}</Lbl><input type={type} value={form[field]} placeholder={ph} onChange={e=>{const v=e.target.value;setForm(p=>({...p,[field]:v}));}} style={{...SS.inp,borderColor:err[field]?"#C62828":"#ccc"}}/>{err[field]&&<p style={{fontSize:12,color:"#C62828",margin:"4px 0 0"}}>Required</p>}</div>);
 
@@ -480,9 +492,9 @@ export default function App() {
           <div style={SS.card}>
             <div style={{padding:"14px 16px",borderBottom:"1px solid #f0f0f0",display:"flex",gap:10,flexWrap:"wrap",alignItems:"center"}}>
               <input placeholder="🔍 Search supplier, invoice no., job ref…" value={search} onChange={e=>setSearch(e.target.value)} style={{...SS.inp,flex:1,minWidth:180}}/>
-              <div style={{display:"flex",gap:6}}>{["All","Pending","Approved","Rejected"].map(s=><button key={s} onClick={()=>setFS(s)} style={fStatus===s?SS.btnTs:SS.btnGs}>{s}</button>)}<button onClick={()=>setSortOrder(o=>o==="desc"?"asc":"desc")} style={{...SS.btnGs,fontSize:12}}>{sortOrder==="desc"?"📅 Newest first":"📅 Oldest first"}</button></div>
+              <div style={{display:"flex",gap:6}}>{["All","Pending","Approved","Rejected"].map(s=><button key={s} onClick={()=>setFS(s)} style={fStatus===s?SS.btnTs:SS.btnGs}>{s}</button>)}<button onClick={()=>setSortOrder(o=>o==="desc"?"asc":"desc")} style={{...SS.btnGs,fontSize:12}}>{sortOrder==="desc"?"📅 Newest first":"📅 Oldest first"}</button>{selectedIds.length>0&&<button onClick={()=>bulkDownload(invoices.filter(i=>selectedIds.includes(i.id)))} style={{...SS.btnTs,fontSize:12}}>⬇ Download {selectedIds.length} as ZIP</button>}</div>
             </div>
-            <InvoiceTable invoices={filtered} budgets={budgets} onStatus={updateStatus} showActions={true} onEdit={setEditInv} viewerRole={role}/>
+            <InvoiceTable invoices={filtered} budgets={budgets} onStatus={updateStatus} showActions={true} onEdit={setEditInv} viewerRole={role} selectable={true} selectedIds={selectedIds} onToggleSelect={toggleSelect} onToggleAll={()=>toggleSelectAll(filtered)}/>
             <div style={{padding:"10px 16px",borderTop:"1px solid #f0f0f0"}}><span style={{fontSize:13,color:"#888"}}>{filtered.length+" invoice"+(filtered.length!==1?"s":"")+" shown"}</span></div>
           </div>
         </div>}
@@ -532,7 +544,7 @@ export default function App() {
                   <div style={{textAlign:"right",flexShrink:0}}><p style={{fontSize:20,fontWeight:700,color:"#222",margin:"0 0 3px"}}>{inv.currency+" "+fmt(inv.amount)}</p>{budget&&<p style={{fontSize:12,color:"#888",margin:0}}>{budget.name}</p>}</div>
                 </div>
                 {inv.notes&&<p style={{fontSize:13,color:"#555",padding:"9px 12px",background:"#f7f8fa",borderRadius:4,borderLeft:"3px solid #dde1e7",margin:"12px 0 0"}}>{inv.notes}</p>}
-                <div style={{display:"flex",gap:8,marginTop:14}}><button style={SS.btnTs} onClick={()=>updateStatus(inv.id,"Approved")}>✓ Approve</button><button style={{...SS.btnGs,color:"#C62828",borderColor:"#EF9A9A"}} onClick={()=>updateStatus(inv.id,"Rejected")}>✕ Reject</button><button style={SS.btnGs} onClick={()=>setEditInv(inv)}>✏️ Edit</button></div>
+                <div style={{display:"flex",gap:8,marginTop:14}}>{inv.pdf_path&&<button style={SS.btnGs} onClick={()=>viewDocument(inv)}>📄 View document</button>}<button style={SS.btnTs} onClick={()=>updateStatus(inv.id,"Approved")}>✓ Approve</button><button style={{...SS.btnGs,color:"#C62828",borderColor:"#EF9A9A"}} onClick={()=>updateStatus(inv.id,"Rejected")}>✕ Reject</button><button style={SS.btnGs} onClick={()=>setEditInv(inv)}>✏️ Edit</button></div>
               </div>
             </div>
           );})}
