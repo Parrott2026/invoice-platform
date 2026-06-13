@@ -5,7 +5,7 @@ const supabase = createClient(
   process.env.REACT_APP_SUPABASE_URL,
   process.env.REACT_APP_SUPABASE_ANON_KEY
 );
-const ANTHROPIC_KEY = process.env.REACT_APP_ANTHROPIC_KEY;
+// Anthropic key now lives server-side in /api/extract
 const TEAL = "#1AAFBF";
 const TEAL_LIGHT = "#e6f7f9";
 const NAV_BG = "#2c3e50";
@@ -44,7 +44,7 @@ function downloadInvoicePDF(inv, budgets) {
 async function extractInvoiceData(file) {
   const b64 = await new Promise((res,rej) => { const r = new FileReader(); r.onload = () => res(r.result.split(",")[1]); r.onerror = rej; r.readAsDataURL(file); });
   const prompt = "Extract invoice data from this document. The SUPPLIER is the company that ISSUED the invoice (usually at the top, with the logo/letterhead) — NOT the bill-to / customer / shipping company. Read proforma invoices and reverse-charge (inversione contabile / non soggetto) documents too. For amount, use the final total payable (Total Due / Amount Due / Net Amount To Pay / Document Total). Detect currency from the symbol or code: GBP for \u00a3, EUR for \u20ac, USD for $. Return ONLY JSON, no markdown: {supplier, invoiceNo, invoiceDate (YYYY-MM-DD), dueDate (YYYY-MM-DD or empty), amount (number string, no thousands separators), currency (ISO 3-letter), notes (max 100 chars), language}. If you cannot read the document at all, return {\"error\":\"unreadable\"}.";
-  const res = await fetch("https://api.anthropic.com/v1/messages", {method:"POST",headers:{"Content-Type":"application/json","x-api-key":ANTHROPIC_KEY,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},body:JSON.stringify({model:"claude-sonnet-4-6",max_tokens:1000,messages:[{role:"user",content:[{type:file.type.startsWith("image/")?"image":"document",source:{type:"base64",media_type:file.type,data:b64}},{type:"text",text:prompt}]}]})});
+  const res = await fetch("/api/extract", {method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({kind:file.type.startsWith("image/")?"image":"document",media_type:file.type,data:b64,prompt:prompt})});
   if (!res.ok) { const t = await res.text(); throw new Error("API "+res.status+": "+t.slice(0,200)); }
   const data = await res.json();
   const text = (data.content && data.content.find(b => b.type==="text") || {}).text || "{}";
