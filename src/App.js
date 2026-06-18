@@ -544,7 +544,7 @@ export default function App() {
                   <div style={{textAlign:"right",flexShrink:0}}><p style={{fontSize:20,fontWeight:700,color:"#222",margin:"0 0 3px"}}>{inv.currency+" "+fmt(inv.amount)}</p>{budget&&<p style={{fontSize:12,color:"#888",margin:0}}>{budget.name}</p>}</div>
                 </div>
                 {inv.notes&&<p style={{fontSize:13,color:"#555",padding:"9px 12px",background:"#f7f8fa",borderRadius:4,borderLeft:"3px solid #dde1e7",margin:"12px 0 0"}}>{inv.notes}</p>}
-                <div style={{display:"flex",gap:8,marginTop:14}}>{inv.pdf_path&&<button style={SS.btnGs} onClick={()=>viewDocument(inv)}>📄 View document</button>}<button style={SS.btnTs} onClick={()=>updateStatus(inv.id,"Approved")}>✓ Approve</button><button style={{...SS.btnGs,color:"#C62828",borderColor:"#EF9A9A"}} onClick={()=>updateStatus(inv.id,"Rejected")}>✕ Reject</button><button style={SS.btnGs} onClick={()=>setEditInv(inv)}>✏️ Edit</button></div>
+                <div style={{display:"flex",gap:8,marginTop:14}}>{inv.pdf_path&&<><button style={SS.btnGs} onClick={()=>viewDocument(inv)}>📄 Preview</button><button style={SS.btnGs} onClick={()=>downloadDocument(inv)}>⬇ Download</button></>}<button style={SS.btnTs} onClick={()=>updateStatus(inv.id,"Approved")}>✓ Approve</button><button style={{...SS.btnGs,color:"#C62828",borderColor:"#EF9A9A"}} onClick={()=>updateStatus(inv.id,"Rejected")}>✕ Reject</button><button style={SS.btnGs} onClick={()=>setEditInv(inv)}>✏️ Edit</button></div>
               </div>
             </div>
           );})}
